@@ -123,6 +123,28 @@ struct NIP46BunkerSignerTests {
         #expect(await harness.signer.activeSessions().count == 1)
     }
 
+    @Test("a known client re-sending its consumed secret is acked as a reconnect")
+    func knownClientReconnectsWithConsumedSecret() async throws {
+        let harness = try await makeHarness()
+        let uri = try await harness.signer.makeBunkerURI()
+        let secret = try secret(fromBunkerURI: uri)
+
+        let first = try await harness.client.request(
+            NIP46.connectRequest(signerPubkey: harness.signerPubkey, secret: secret)
+        )
+        #expect(first?.result == "ack")
+
+        // nostr-tools and rust-nostr clients send `connect` with the stored
+        // bunker secret on every launch. Same client, same secret: a reconnect,
+        // not a replay — it must be answered or the pairing is stranded.
+        let again = try await harness.client.request(
+            NIP46.connectRequest(signerPubkey: harness.signerPubkey, secret: secret)
+        )
+        #expect(again?.result == "ack")
+        #expect(again?.error == nil)
+        #expect(await harness.signer.activeSessions().count == 1)
+    }
+
     @Test("connect without a secret from an unknown client is unauthorized")
     func connectUnknownClientRejected() async throws {
         let harness = try await makeHarness()
@@ -419,6 +441,23 @@ struct NIP46BunkerSignerTests {
         // Give any (wrong) extra responses a moment to appear.
         try await Task.sleep(for: .milliseconds(300))
         #expect(await harness.bus.published.count == publishedBefore + 1)
+    }
+
+    @Test("independent clients may reuse the same request id")
+    func requestIDsAreScopedPerClient() async throws {
+        let harness = try await makeHarness()
+        let other = try TestNIP46Client(bus: harness.bus, signerPubkey: harness.signerPubkey)
+
+        // Short, colliding ids are common in the wild (`Math.random().toString(36)`).
+        let first = try await harness.client.request(NIP46.Request(id: "1", method: .ping))
+        let second = try await other.request(NIP46.Request(id: "1", method: .ping))
+
+        #expect(first?.result == "pong")
+        #expect(second?.result == "pong")
+
+        // The same client replaying its own id is still suppressed.
+        let replay = try await harness.client.request(NIP46.Request(id: "1", method: .ping), timeout: 0.75)
+        #expect(replay == nil)
     }
 
     @Test("stale events are dropped")

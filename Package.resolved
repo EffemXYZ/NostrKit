@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/SparrowTek/CoreNostr.git",
       "state" : {
-        "revision" : "b78be6445fa9b736f729eb74ab981e0671bf5472",
-        "version" : "3.0.1"
+        "revision" : "d842c83c49e421022f29fe158088a4e4b780c235",
+        "version" : "3.0.2"
       }
     },
     {

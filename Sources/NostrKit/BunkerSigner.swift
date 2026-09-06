@@ -460,8 +460,9 @@ public actor BunkerSigner {
             return
         }
 
-        // 7. Request-id replay protection (bounded window).
-        guard processedRequestIDs.insert(request.id) else { return }
+        // 7. Request-id replay protection (bounded window), scoped to the
+        //    client: independent clients may legitimately reuse short ids.
+        guard processedRequestIDs.insert("\(clientPubkey):\(request.id)") else { return }
 
         touchSession(clientPubkey, scheme: scheme)
 
@@ -491,15 +492,19 @@ public actor BunkerSigner {
     private func handleConnect(_ request: NIP46.Request, from clientPubkey: String, scheme: NIP46EncryptionScheme) async {
         let secret: String? = request.params.count > 1 && !request.params[1].isEmpty ? request.params[1] : nil
 
-        // Spec: attempts reusing an already-consumed secret are ignored —
-        // no response at all.
-        if let secret, consumedSecrets.contains(secret) {
-            nip46Logger.info("Ignoring connect reusing a consumed secret from \(clientPubkey.prefix(8))")
+        let isKnownClient = sessions[clientPubkey] != nil
+
+        // Spec: attempts to establish a NEW connection with an already-consumed
+        // secret are ignored — no response at all. A client that already holds
+        // a session is reconnecting, not connecting: clients routinely re-send
+        // `connect` with the bunker URI's stored secret on every launch, and
+        // going silent on them would strand every pairing after its first use.
+        if let secret, consumedSecrets.contains(secret), !isKnownClient {
+            nip46Logger.info("Ignoring connect reusing a consumed secret from unknown client \(clientPubkey.prefix(8))")
             return
         }
 
         let hasValidSecret = secret.map { issuedSecrets.contains($0) } ?? false
-        let isKnownClient = sessions[clientPubkey] != nil
 
         let accepted: Bool
         switch configuration.connectPolicy {
